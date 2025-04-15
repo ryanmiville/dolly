@@ -23,6 +23,11 @@ pub type Produce(state, event) {
   Done
 }
 
+pub type Mode {
+  Forward
+  Accumulate
+}
+
 pub type Builder(state, dispatcher, event) {
   Builder(
     initialise: fn() -> state,
@@ -31,6 +36,7 @@ pub type Builder(state, dispatcher, event) {
     handle_demand: fn(state, Int) -> Produce(state, event),
     buffer_strategy: buffer.Keep,
     buffer_capacity: Int,
+    mode: Mode,
     name: Option(Name(Msg(event))),
   )
 }
@@ -54,6 +60,7 @@ pub fn new_with_initialiser(
     handle_demand: fn(_, _) { Done },
     buffer_strategy: buffer.Last,
     buffer_capacity: 10_000,
+    mode: Forward,
     name: None,
   )
 }
@@ -86,6 +93,13 @@ pub fn buffer_capacity(
   Builder(..builder, buffer_capacity: buffer_capacity)
 }
 
+pub fn mode(
+  builder: Builder(state, dispatcher, event),
+  mode: Mode,
+) -> Builder(state, dispatcher, event) {
+  Builder(..builder, mode:)
+}
+
 pub fn start(
   builder: Builder(state, dispatcher, event),
 ) -> Result(Producer(event), StartError) {
@@ -94,6 +108,14 @@ pub fn start(
   |> name_actor(builder.name)
   |> actor.start
   |> result.map(fn(a) { a.data })
+}
+
+pub fn accumulate(producer: Producer(event)) {
+  process.send(producer.subject, message.Accumulate)
+}
+
+pub fn forward(producer: Producer(event)) {
+  process.send(producer.subject, message.Forward)
 }
 
 type Msg(event) =
@@ -105,6 +127,11 @@ type Self(event) =
 type Consumer(event) =
   Subject(message.Consumer(event))
 
+type Accumulated(event) {
+  Dispatch(events: List(event), length: Int)
+  Demand(counter: Int)
+}
+
 type State(state, dispatcher, event) {
   State(
     state: state,
@@ -115,6 +142,8 @@ type State(state, dispatcher, event) {
     consumers: Set(Consumer(event)),
     monitors: Dict(Pid, #(Monitor, Consumer(event))),
     handle_demand: fn(state, Int) -> Produce(state, event),
+    mode: Mode,
+    accumulated: List(Accumulated(event)),
   )
 }
 
@@ -155,6 +184,8 @@ fn initialise(
       consumers: set.new(),
       monitors: dict.new(),
       handle_demand: builder.handle_demand,
+      mode: builder.mode,
+      accumulated: [],
     )
   actor.initialised(state)
   |> actor.selecting(selector)
@@ -175,7 +206,49 @@ fn on_message(
     message.ProducerSubscribe(consumer:, demand:) ->
       on_subscribe(state, consumer, demand)
     message.ProducerUnsubscribe(consumer:) -> on_unsubscribe(state, consumer)
+    message.Accumulate -> on_accumulate(state)
+    message.Forward -> on_forward(state)
   }
+}
+
+fn on_forward(
+  state: State(state, dispatcher, event),
+) -> Next(state, dispatcher, event) {
+  let state = State(..state, mode: Forward)
+  use <- bool.guard(state.accumulated == [], actor.continue(state))
+  let accumulated = list.reverse(state.accumulated)
+  case on_forward_loop(state, accumulated) {
+    Ok(state) -> actor.continue(state)
+    _ -> actor.stop()
+  }
+}
+
+fn on_forward_loop(
+  state: State(state, dispatcher, event),
+  accumulated: List(Accumulated(event)),
+) -> Result(State(state, dispatcher, event), Nil) {
+  case accumulated {
+    [] -> Ok(state)
+    [elem, ..rest] ->
+      handle_accumulated_event(state, elem)
+      |> result.try(on_forward_loop(_, rest))
+  }
+}
+
+fn handle_accumulated_event(
+  state: State(state, dispatcher, event),
+  event: Accumulated(event),
+) {
+  case event {
+    Demand(counter:) -> take_from_buffer_or_handle_demand(state, counter)
+    Dispatch(events:, length:) -> Ok(dispatch_events(state, events, length))
+  }
+}
+
+fn on_accumulate(
+  state: State(state, dispatcher, event),
+) -> Next(state, dispatcher, event) {
+  State(..state, mode: Accumulate) |> actor.continue
 }
 
 fn on_ask(
@@ -184,8 +257,14 @@ fn on_ask(
   consumer: Consumer(event),
 ) -> Next(state, dispatcher, event) {
   let #(demand, dispatcher) = dispatcher.ask(state.dispatcher, demand, consumer)
-  State(..state, dispatcher:)
-  |> take_from_buffer_or_handle_demand(demand)
+  let result =
+    State(..state, dispatcher:)
+    |> take_from_buffer_or_handle_demand(demand)
+
+  case result {
+    Ok(state) -> actor.continue(state)
+    _ -> actor.stop()
+  }
 }
 
 fn on_consumer_down(
@@ -255,19 +334,25 @@ fn on_unsubscribe(
 fn take_from_buffer_or_handle_demand(
   state: State(state, dispatcher, event),
   demand: Int,
-) -> Next(state, dispatcher, event) {
+) -> Result(State(state, dispatcher, event), Nil) {
   case take_from_buffer(state, demand) {
     #(0, state) -> {
-      actor.continue(state)
+      Ok(state)
     }
     #(demand, state) -> {
-      case state.handle_demand(state.state, demand) {
-        Next(events, new_state) -> {
-          State(..state, state: new_state)
-          |> dispatch_events(events, list.length(events))
-          |> actor.continue
+      case state.mode {
+        Accumulate -> {
+          Ok(State(..state, accumulated: [Demand(demand), ..state.accumulated]))
         }
-        Done -> actor.stop()
+        Forward ->
+          case state.handle_demand(state.state, demand) {
+            Next(events, new_state) -> {
+              State(..state, state: new_state)
+              |> dispatch_events(events, list.length(events))
+              |> Ok
+            }
+            Done -> Error(Nil)
+          }
       }
     }
   }
@@ -279,15 +364,8 @@ fn take_from_buffer(
 ) -> #(Int, State(state, dispatcher, event)) {
   let Take(buffer, demand_left, events) = buffer.take(state.buffer, demand)
   use <- bool.guard(events == [], #(demand, state))
-  let #(events, dispatcher) =
-    dispatcher.dispatch(
-      state.dispatcher,
-      state.self,
-      events,
-      demand - demand_left,
-    )
-  let buffer = buffer.store(buffer, events)
-  State(..state, buffer:, dispatcher:)
+  State(..state, buffer:)
+  |> dispatch_events(events, demand - demand_left)
   |> take_from_buffer(demand_left)
 }
 
@@ -297,6 +375,7 @@ fn dispatch_events(
   length: Int,
 ) -> State(state, dispatcher, event) {
   use <- bool.guard(events == [], state)
+  use <- guard_accumulating(state, events, length)
   use <- guard_no_consumers(state, events)
 
   let #(events, dispatcher) =
@@ -305,11 +384,23 @@ fn dispatch_events(
   State(..state, buffer:, dispatcher:)
 }
 
+fn guard_accumulating(
+  state: State(state, dispatcher, event),
+  events: List(event),
+  length: Int,
+  continue: fn() -> State(state, dispatcher, event),
+) -> State(state, dispatcher, event) {
+  let accumulating = fn() {
+    State(..state, accumulated: [Dispatch(events, length), ..state.accumulated])
+  }
+  bool.lazy_guard(state.mode == Accumulate, accumulating, continue)
+}
+
 fn guard_no_consumers(
-  state: State(s, ds, e),
-  events: List(e),
-  continue: fn() -> State(s, ds, e),
-) -> State(s, ds, e) {
+  state: State(state, dispatcher, event),
+  events: List(event),
+  continue: fn() -> State(state, dispatcher, event),
+) -> State(state, dispatcher, event) {
   let when_empty = fn() {
     let buffer = buffer.store(state.buffer, events)
     State(..state, buffer:)

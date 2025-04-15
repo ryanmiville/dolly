@@ -5,6 +5,8 @@ pub type Producer(event) {
   ProducerSubscribe(consumer: Subject(Consumer(event)), demand: Int)
   ProducerUnsubscribe(consumer: Subject(Consumer(event)))
   ConsumerDown(process.Down)
+  Accumulate
+  Forward
 }
 
 pub type Processor(in, out) {

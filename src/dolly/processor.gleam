@@ -250,6 +250,8 @@ fn on_producer_message(
       on_producer_subscribe(state, consumer, demand)
     message.ProducerUnsubscribe(consumer:) ->
       on_producer_unsubscribe(state, consumer)
+    message.Accumulate -> actor.continue(state)
+    message.Forward -> actor.continue(state)
   }
 }
 
