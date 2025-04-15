@@ -143,7 +143,7 @@ fn initialise(
 
   let dispatcher =
     builder.initialise_dispatcher()
-    |> dispatcher.init
+    |> dispatcher.initialise()
 
   let state =
     State(

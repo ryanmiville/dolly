@@ -11,7 +11,7 @@ pub opaque type Dispatcher(state, event) {
 
 pub type Behavior(state, event) {
   Behavior(
-    init: fn() -> state,
+    initialise: fn() -> state,
     ask: fn(state, Int, From(event)) -> #(Int, state),
     cancel: fn(state, From(event)) -> #(Int, state),
     dispatch: fn(state, Subject(message.Producer(event)), List(event), Int) ->
@@ -20,8 +20,8 @@ pub type Behavior(state, event) {
   )
 }
 
-pub fn init(behavior: Behavior(state, event)) -> Dispatcher(state, event) {
-  Dispatcher(state: behavior.init(), behavior:)
+pub fn initialise(behavior: Behavior(state, event)) -> Dispatcher(state, event) {
+  Dispatcher(state: behavior.initialise(), behavior:)
 }
 
 pub fn ask(

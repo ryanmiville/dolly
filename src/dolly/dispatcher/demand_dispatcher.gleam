@@ -36,10 +36,18 @@ pub fn max_demand(builder: Builder, max_demand: Int) -> Builder {
 }
 
 pub fn initialiser(builder) {
-  fn() { Behavior(init: init(builder), ask:, cancel:, dispatch:, subscribe:) }
+  fn() {
+    Behavior(
+      initialise: initialise(builder),
+      ask:,
+      cancel:,
+      dispatch:,
+      subscribe:,
+    )
+  }
 }
 
-fn init(builder: Builder) -> fn() -> DemandDispatcher(event) {
+fn initialise(builder: Builder) -> fn() -> DemandDispatcher(event) {
   fn() { DemandDispatcher([], 0, builder.max_demand, builder.shuffle) }
 }
 

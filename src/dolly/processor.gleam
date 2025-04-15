@@ -159,7 +159,7 @@ fn initialise(
     |> buffer.keep(builder.buffer_strategy)
     |> buffer.capacity(builder.buffer_capacity)
 
-  let dispatcher = builder.initialise_dispatcher() |> dispatcher.init
+  let dispatcher = builder.initialise_dispatcher() |> dispatcher.initialise
 
   let state =
     State(
