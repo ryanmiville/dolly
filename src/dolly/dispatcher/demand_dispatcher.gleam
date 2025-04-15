@@ -10,7 +10,7 @@ import redux/erlang/process.{type Subject}
 pub type Demand(event) =
   #(From(event), Int)
 
-pub type DemandDispatcher(event) {
+pub opaque type DemandDispatcher(event) {
   DemandDispatcher(
     demands: List(Demand(event)),
     pending: Int,
@@ -19,7 +19,7 @@ pub type DemandDispatcher(event) {
   )
 }
 
-pub type Builder {
+pub opaque type Builder {
   Builder(max_demand: Option(Int), shuffle: Bool)
 }
 
@@ -44,9 +44,9 @@ fn init(builder: Builder) -> fn() -> DemandDispatcher(event) {
 }
 
 fn ask(
+  state: DemandDispatcher(event),
   demand: Int,
   from: From(event),
-  state: DemandDispatcher(event),
 ) -> #(Int, DemandDispatcher(event)) {
   let max = option.unwrap(state.max_demand, demand)
 
@@ -93,8 +93,8 @@ fn add_demand(
 }
 
 fn cancel(
-  from: From(event),
   state: DemandDispatcher(event),
+  from: From(event),
 ) -> #(Int, DemandDispatcher(event)) {
   let state = case list.key_pop(state.demands, from) {
     Error(Nil) -> state
@@ -110,26 +110,26 @@ fn cancel(
 }
 
 fn dispatch(
+  state: DemandDispatcher(event),
   self: Subject(message.Producer(event)),
   events: List(event),
   length: Int,
-  state: DemandDispatcher(event),
 ) -> #(List(event), DemandDispatcher(event)) {
-  use <- guard_shuffle(self, events, length, state)
+  use <- guard_shuffle(state, self, events, length)
   let #(events, demands) = dispatch_loop(state.demands, self, events, length)
   #(events, DemandDispatcher(..state, demands:))
 }
 
 fn guard_shuffle(
+  state: DemandDispatcher(event),
   self: Subject(message.Producer(event)),
   events: List(event),
   length: Int,
-  state: DemandDispatcher(event),
   continue: fn() -> #(List(event), DemandDispatcher(event)),
 ) -> #(List(event), DemandDispatcher(event)) {
   let shuffle = fn() {
     let state = DemandDispatcher(..state, shuffle: False)
-    dispatch(self, list.shuffle(events), length, state)
+    dispatch(state, self, list.shuffle(events), length)
   }
   bool.lazy_guard(state.shuffle, shuffle, continue)
 }
@@ -168,8 +168,8 @@ fn split_events(
 }
 
 fn subscribe(
-  from: From(event),
   state: DemandDispatcher(event),
+  from: From(event),
 ) -> Result(#(Int, DemandDispatcher(event)), Nil) {
   let state =
     DemandDispatcher(..state, demands: list.append(state.demands, [#(from, 0)]))
