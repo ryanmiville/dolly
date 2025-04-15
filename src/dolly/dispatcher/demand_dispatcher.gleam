@@ -10,7 +10,7 @@ import redux/erlang/process.{type Subject}
 pub type Demand(event) =
   #(From(event), Int)
 
-pub opaque type DemandDispatcher(event) {
+pub type DemandDispatcher(event) {
   DemandDispatcher(
     demands: List(Demand(event)),
     pending: Int,
@@ -35,16 +35,20 @@ pub fn max_demand(builder: Builder, max_demand: Int) -> Builder {
   Builder(..builder, max_demand: Some(max_demand))
 }
 
-pub fn initialiser(builder) {
-  fn() {
-    Behavior(
-      initialise: initialise(builder),
-      ask:,
-      cancel:,
-      dispatch:,
-      subscribe:,
-    )
-  }
+pub fn initialiser(
+  builder: Builder,
+) -> fn() -> Behavior(DemandDispatcher(event), event) {
+  fn() { build(builder) }
+}
+
+pub fn build(builder: Builder) -> Behavior(DemandDispatcher(event), event) {
+  Behavior(
+    initialise: initialise(builder),
+    ask:,
+    cancel:,
+    dispatch:,
+    subscribe:,
+  )
 }
 
 fn initialise(builder: Builder) -> fn() -> DemandDispatcher(event) {
@@ -136,8 +140,9 @@ fn guard_shuffle(
   continue: fn() -> #(List(event), DemandDispatcher(event)),
 ) -> #(List(event), DemandDispatcher(event)) {
   let shuffle = fn() {
-    let state = DemandDispatcher(..state, shuffle: False)
-    dispatch(state, self, list.shuffle(events), length)
+    let demands = list.shuffle(state.demands)
+    DemandDispatcher(..state, demands:, shuffle: False)
+    |> dispatch(self, events, length)
   }
   bool.lazy_guard(state.shuffle, shuffle, continue)
 }

@@ -5,7 +5,7 @@ import redux/erlang/process.{type Subject}
 pub type From(event) =
   Subject(message.Consumer(event))
 
-pub opaque type Dispatcher(state, event) {
+pub type Dispatcher(state, event) {
   Dispatcher(state: state, behavior: Behavior(state, event))
 }
 
