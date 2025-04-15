@@ -35,7 +35,7 @@ pub type Builder(state, dispatcher, in, out) {
     timeout: Int,
     handle_events: fn(state, List(in)) -> Produce(state, out),
     buffer_strategy: buffer.Keep,
-    buffer_capacity: Int,
+    buffer_capacity: Option(Int),
     subscriptions: List(Subscription(in)),
     name: Option(Name(message.Producer(out))),
   )
@@ -59,7 +59,8 @@ pub fn new_with_initialiser(
     initialise_dispatcher:,
     handle_events: fn(_, _) { producer.Done },
     buffer_strategy: buffer.Last,
-    buffer_capacity: 10_000,
+    // TODO make option for infinity
+    buffer_capacity: None,
     subscriptions: [],
     name: None,
   )
@@ -90,7 +91,7 @@ pub fn buffer_capacity(
   builder: Builder(state, dispatcher, in, out),
   buffer_capacity: Int,
 ) -> Builder(state, dispatcher, in, out) {
-  Builder(..builder, buffer_capacity:)
+  Builder(..builder, buffer_capacity: Some(buffer_capacity))
 }
 
 pub fn add_subscription(
@@ -154,10 +155,17 @@ fn initialise(
     |> process.selecting(self_consumer, message.ConsumerMsg)
     |> process.selecting(self_producer, message.ProducerMsg)
 
-  let buffer =
-    buffer.new()
-    |> buffer.keep(builder.buffer_strategy)
-    |> buffer.capacity(builder.buffer_capacity)
+  let buffer = case builder.buffer_capacity {
+    Some(cap) -> {
+      buffer.new()
+      |> buffer.keep(builder.buffer_strategy)
+      |> buffer.capacity(cap)
+    }
+    None -> {
+      buffer.new()
+      |> buffer.keep(builder.buffer_strategy)
+    }
+  }
 
   let dispatcher = builder.initialise_dispatcher() |> dispatcher.initialise
 
