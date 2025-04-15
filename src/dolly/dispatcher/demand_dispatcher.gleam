@@ -12,23 +12,35 @@ pub type Demand(event) =
 
 pub type DemandDispatcher(event) {
   DemandDispatcher(
-    self: Subject(message.Producer(event)),
     demands: List(Demand(event)),
     pending: Int,
     max_demand: Option(Int),
+    shuffle: Bool,
   )
 }
 
-pub fn new(
-  self: Subject(message.Producer(event)),
-) -> Behavior(DemandDispatcher(event), event) {
-  Behavior(init: init(self), ask:, cancel:, dispatch:, subscribe:)
+pub type Builder {
+  Builder(max_demand: Option(Int), shuffle: Bool)
 }
 
-fn init(
-  self: Subject(message.Producer(event)),
-) -> fn() -> DemandDispatcher(event) {
-  fn() { DemandDispatcher(self, [], 0, None) }
+pub fn new() -> Builder {
+  Builder(None, False)
+}
+
+pub fn shuffle_initial_demands(builder: Builder) -> Builder {
+  Builder(..builder, shuffle: True)
+}
+
+pub fn max_demand(builder: Builder, max_demand: Int) -> Builder {
+  Builder(..builder, max_demand: Some(max_demand))
+}
+
+pub fn initialiser(builder) {
+  fn() { Behavior(init: init(builder), ask:, cancel:, dispatch:, subscribe:) }
+}
+
+fn init(builder: Builder) -> fn() -> DemandDispatcher(event) {
+  fn() { DemandDispatcher([], 0, builder.max_demand, builder.shuffle) }
 }
 
 fn ask(
@@ -98,13 +110,28 @@ fn cancel(
 }
 
 fn dispatch(
+  self: Subject(message.Producer(event)),
   events: List(event),
   length: Int,
   state: DemandDispatcher(event),
 ) -> #(List(event), DemandDispatcher(event)) {
-  let #(events, demands) =
-    dispatch_loop(state.demands, state.self, events, length)
+  use <- guard_shuffle(self, events, length, state)
+  let #(events, demands) = dispatch_loop(state.demands, self, events, length)
   #(events, DemandDispatcher(..state, demands:))
+}
+
+fn guard_shuffle(
+  self: Subject(message.Producer(event)),
+  events: List(event),
+  length: Int,
+  state: DemandDispatcher(event),
+  continue: fn() -> #(List(event), DemandDispatcher(event)),
+) -> #(List(event), DemandDispatcher(event)) {
+  let shuffle = fn() {
+    let state = DemandDispatcher(..state, shuffle: False)
+    dispatch(self, list.shuffle(events), length, state)
+  }
+  bool.lazy_guard(state.shuffle, shuffle, continue)
 }
 
 fn dispatch_loop(
@@ -117,10 +144,10 @@ fn dispatch_loop(
 
   case demands {
     [] | [#(_, 0), ..] -> #(events, demands)
-    [#(event, counter), ..rest] -> {
+    [#(from, counter), ..rest] -> {
       let #(now, later, length, counter) = split_events(events, length, counter)
-      process.send(event, message.NewEvents(now, self))
-      let demands = add_demand(rest, event, counter)
+      process.send(from, message.NewEvents(now, self))
+      let demands = add_demand(rest, from, counter)
       dispatch_loop(demands, self, later, length)
     }
   }

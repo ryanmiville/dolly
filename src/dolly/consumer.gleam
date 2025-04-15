@@ -20,10 +20,10 @@ pub type Consume(state) {
   Done(ExitReason)
 }
 
-pub type Builder(state, event) {
+pub opaque type Builder(state, event) {
   Builder(
-    init: fn() -> state,
-    init_timeout: Int,
+    initialise: fn() -> state,
+    timeout: Int,
     subscriptions: List(Subscription(event)),
     handle_events: fn(state, List(event)) -> Consume(state),
     name: Option(Name(Msg(event))),
@@ -39,12 +39,34 @@ pub fn new_with_initialiser(
   initialise: fn() -> state,
 ) -> Builder(state, event) {
   Builder(
-    init: initialise,
-    init_timeout: timeout,
+    initialise: initialise,
+    timeout: timeout,
     subscriptions: [],
     handle_events: fn(state, _) { Continue(state) },
     name: None,
   )
+}
+
+pub fn handle_events(
+  builder: Builder(state, event),
+  handle_events: fn(state, List(event)) -> Consume(state),
+) -> Builder(state, event) {
+  Builder(..builder, handle_events:)
+}
+
+pub fn named(
+  builder: Builder(state, event),
+  name: Name(Msg(event)),
+) -> Builder(state, event) {
+  Builder(..builder, name: Some(name))
+}
+
+pub fn add_subscription(
+  builder: Builder(state, event),
+  subscription,
+) -> Builder(state, event) {
+  let subscriptions = [subscription, ..builder.subscriptions]
+  Builder(..builder, subscriptions:)
 }
 
 type Msg(event) =
@@ -70,7 +92,7 @@ type State(state, event) {
 pub fn start(
   builder: Builder(state, event),
 ) -> Result(Consumer(event), StartError) {
-  actor.new_with_initialiser(builder.init_timeout, initialise(_, builder))
+  actor.new_with_initialiser(builder.timeout, initialise(_, builder))
   |> actor.on_message(on_message)
   |> name_actor(builder.name)
   |> actor.start
@@ -90,7 +112,7 @@ fn initialise(
 
   let state =
     State(
-      state: builder.init(),
+      state: builder.initialise(),
       self:,
       selector:,
       producers: dict.new(),

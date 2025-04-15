@@ -30,10 +30,9 @@ pub type Processor(in, out) {
 
 pub type Builder(state, dispatcher, in, out) {
   Builder(
-    init: fn() -> state,
-    init_dispatcher: fn(SubProducer(out)) ->
-      dispatcher.Behavior(dispatcher, out),
-    init_timeout: Int,
+    initialise: fn() -> state,
+    initialise_dispatcher: fn() -> dispatcher.Behavior(dispatcher, out),
+    timeout: Int,
     handle_events: fn(state, List(in)) -> Produce(state, out),
     buffer_strategy: buffer.Keep,
     buffer_capacity: Int,
@@ -50,16 +49,56 @@ pub fn new_with_initialiser(
   timeout: Int,
   initialise: fn() -> state,
 ) -> Builder(state, DemandDispatcher(out), in, out) {
+  let initialise_dispatcher =
+    demand_dispatcher.new()
+    |> demand_dispatcher.initialiser
+
   Builder(
-    init: initialise,
-    init_timeout: timeout,
-    init_dispatcher: demand_dispatcher.new,
+    initialise:,
+    timeout:,
+    initialise_dispatcher:,
     handle_events: fn(_, _) { producer.Done },
     buffer_strategy: buffer.Last,
     buffer_capacity: 10_000,
     subscriptions: [],
     name: None,
   )
+}
+
+pub fn named(
+  builder: Builder(state, dispatcher, in, out),
+  name: Name(message.Producer(out)),
+) -> Builder(state, dispatcher, in, out) {
+  Builder(..builder, name: Some(name))
+}
+
+pub fn handle_events(
+  builder: Builder(state, dispatcher, in, out),
+  handle_events: fn(state, List(in)) -> Produce(state, out),
+) -> Builder(state, dispatcher, in, out) {
+  Builder(..builder, handle_events:)
+}
+
+pub fn buffer_strategy(
+  builder: Builder(state, dispatcher, in, out),
+  buffer_strategy: buffer.Keep,
+) -> Builder(state, dispatcher, in, out) {
+  Builder(..builder, buffer_strategy:)
+}
+
+pub fn buffer_capacity(
+  builder: Builder(state, dispatcher, in, out),
+  buffer_capacity: Int,
+) -> Builder(state, dispatcher, in, out) {
+  Builder(..builder, buffer_capacity:)
+}
+
+pub fn add_subscription(
+  builder: Builder(state, dispatcher, in, out),
+  subscription: Subscription(in),
+) -> Builder(state, dispatcher, in, out) {
+  let subscriptions = [subscription, ..builder.subscriptions]
+  Builder(..builder, subscriptions:)
 }
 
 pub fn as_producer(processor: Processor(in, out)) -> Producer(out) {
@@ -73,7 +112,7 @@ pub fn as_consumer(processor: Processor(in, out)) -> Consumer(in) {
 pub fn start(
   builder: Builder(state, dispatcher, in, out),
 ) -> Result(Processor(in, out), StartError) {
-  actor.new_with_initialiser(builder.init_timeout, initialise(_, builder))
+  actor.new_with_initialiser(builder.timeout, initialise(_, builder))
   |> actor.on_message(on_message)
   |> actor.start
   |> result.map(fn(a) { a.data })
@@ -120,11 +159,11 @@ fn initialise(
     |> buffer.keep(builder.buffer_strategy)
     |> buffer.capacity(builder.buffer_capacity)
 
-  let dispatcher = builder.init_dispatcher(self_producer) |> dispatcher.init
+  let dispatcher = builder.initialise_dispatcher() |> dispatcher.init
 
   let state =
     State(
-      state: builder.init(),
+      state: builder.initialise(),
       self:,
       self_producer:,
       self_consumer:,
@@ -313,7 +352,7 @@ fn dispatch_events(
   use <- guard_no_consumers(state, events)
 
   let #(events, dispatcher) =
-    dispatcher.dispatch(state.dispatcher, events, length)
+    dispatcher.dispatch(state.dispatcher, state.self_producer, events, length)
 
   let Events(queue, demand) = state.events
   let demand = demand - { length - list.length(events) }

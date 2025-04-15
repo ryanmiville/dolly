@@ -14,7 +14,8 @@ pub type Behavior(state, event) {
     init: fn() -> state,
     ask: fn(Int, From(event), state) -> #(Int, state),
     cancel: fn(From(event), state) -> #(Int, state),
-    dispatch: fn(List(event), Int, state) -> #(List(event), state),
+    dispatch: fn(Subject(message.Producer(event)), List(event), Int, state) ->
+      #(List(event), state),
     subscribe: fn(From(event), state) -> Result(#(Int, state), Nil),
   )
 }
@@ -43,11 +44,12 @@ pub fn cancel(
 
 pub fn dispatch(
   dispatcher: Dispatcher(state, event),
+  self: Subject(message.Producer(event)),
   events: List(event),
   length: Int,
 ) -> #(List(event), Dispatcher(state, event)) {
   let #(events, state) =
-    dispatcher.behavior.dispatch(events, length, dispatcher.state)
+    dispatcher.behavior.dispatch(self, events, length, dispatcher.state)
   #(events, Dispatcher(..dispatcher, state:))
 }
 

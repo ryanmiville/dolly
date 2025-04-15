@@ -16,7 +16,7 @@ pub fn to(producer: Producer(event)) -> Subscription(event) {
     to: producer,
     restart: supervision.Permanent,
     min_demand: None,
-    max_demand: 10_000,
+    max_demand: 1000,
   )
 }
 

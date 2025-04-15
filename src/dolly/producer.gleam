@@ -25,10 +25,9 @@ pub type Produce(state, event) {
 
 pub type Builder(state, dispatcher, event) {
   Builder(
-    init: fn() -> state,
-    init_dispatcher: fn(Subject(Msg(event))) ->
-      dispatcher.Behavior(dispatcher, event),
-    init_timeout: Int,
+    initialise: fn() -> state,
+    initialise_dispatcher: fn() -> dispatcher.Behavior(dispatcher, event),
+    timeout: Int,
     handle_demand: fn(state, Int) -> Produce(state, event),
     buffer_strategy: buffer.Keep,
     buffer_capacity: Int,
@@ -44,15 +43,57 @@ pub fn new_with_initialiser(
   timeout: Int,
   initialise: fn() -> state,
 ) -> Builder(state, DemandDispatcher(event), event) {
+  let initialise_dispatcher =
+    demand_dispatcher.new()
+    |> demand_dispatcher.initialiser
+
   Builder(
-    init: initialise,
-    init_timeout: timeout,
-    init_dispatcher: demand_dispatcher.new,
+    initialise:,
+    timeout:,
+    initialise_dispatcher:,
     handle_demand: fn(_, _) { Done },
     buffer_strategy: buffer.Last,
     buffer_capacity: 10_000,
     name: None,
   )
+}
+
+pub fn named(
+  builder: Builder(state, dispatcher, event),
+  name: Name(Msg(event)),
+) -> Builder(state, dispatcher, event) {
+  Builder(..builder, name: Some(name))
+}
+
+pub fn handle_demand(
+  builder: Builder(state, dispatcher, event),
+  handle_demand: fn(state, Int) -> Produce(state, event),
+) -> Builder(state, dispatcher, event) {
+  Builder(..builder, handle_demand: handle_demand)
+}
+
+pub fn buffer_strategy(
+  builder: Builder(state, dispatcher, event),
+  buffer_strategy: buffer.Keep,
+) -> Builder(state, dispatcher, event) {
+  Builder(..builder, buffer_strategy: buffer_strategy)
+}
+
+pub fn buffer_capacity(
+  builder: Builder(state, dispatcher, event),
+  buffer_capacity: Int,
+) -> Builder(state, dispatcher, event) {
+  Builder(..builder, buffer_capacity: buffer_capacity)
+}
+
+pub fn start(
+  builder: Builder(state, dispatcher, event),
+) -> Result(Producer(event), StartError) {
+  actor.new_with_initialiser(builder.timeout, initialise(_, builder))
+  |> actor.on_message(on_message)
+  |> name_actor(builder.name)
+  |> actor.start
+  |> result.map(fn(a) { a.data })
 }
 
 type Msg(event) =
@@ -75,16 +116,6 @@ type State(state, dispatcher, event) {
     monitors: Dict(Pid, #(Monitor, Consumer(event))),
     handle_demand: fn(state, Int) -> Produce(state, event),
   )
-}
-
-pub fn start(
-  builder: Builder(state, dispatcher, event),
-) -> Result(Producer(event), StartError) {
-  actor.new_with_initialiser(builder.init_timeout, initialise(_, builder))
-  |> actor.on_message(on_message)
-  |> name_actor(builder.name)
-  |> actor.start
-  |> result.map(fn(a) { a.data })
 }
 
 fn name_actor(builder, name) {
@@ -111,12 +142,12 @@ fn initialise(
     |> buffer.capacity(builder.buffer_capacity)
 
   let dispatcher =
-    builder.init_dispatcher(self)
+    builder.initialise_dispatcher()
     |> dispatcher.init
 
   let state =
     State(
-      state: builder.init(),
+      state: builder.initialise(),
       self:,
       selector:,
       buffer:,
@@ -249,7 +280,12 @@ fn take_from_buffer(
   let Take(buffer, demand_left, events) = buffer.take(state.buffer, demand)
   use <- bool.guard(events == [], #(demand, state))
   let #(events, dispatcher) =
-    dispatcher.dispatch(state.dispatcher, events, demand - demand_left)
+    dispatcher.dispatch(
+      state.dispatcher,
+      state.self,
+      events,
+      demand - demand_left,
+    )
   let buffer = buffer.store(buffer, events)
   State(..state, buffer:, dispatcher:)
   |> take_from_buffer(demand_left)
@@ -264,7 +300,7 @@ fn dispatch_events(
   use <- guard_no_consumers(state, events)
 
   let #(events, dispatcher) =
-    dispatcher.dispatch(state.dispatcher, events, length)
+    dispatcher.dispatch(state.dispatcher, state.self, events, length)
   let buffer = buffer.store(state.buffer, events)
   State(..state, buffer:, dispatcher:)
 }
