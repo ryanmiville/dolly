@@ -3,6 +3,7 @@ import dolly/internal/message
 import dolly/subscription.{type Subscription}
 import gleam/dict.{type Dict}
 import gleam/function
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import redux/erlang/process.{
@@ -120,10 +121,12 @@ fn initialise(
       handle_events: builder.handle_events,
     )
 
+  let result = init_subscriptions(self, builder.subscriptions)
+
+  use _ <- result.map(result)
   actor.initialised(state)
   |> actor.selecting(selector)
   |> actor.returning(Consumer(self))
-  |> Ok
 }
 
 fn name_actor(builder, name) {
@@ -131,6 +134,36 @@ fn name_actor(builder, name) {
     Some(name) -> actor.named(builder, name)
     None -> builder
   }
+}
+
+@internal
+pub fn init_subscriptions(
+  self: Subject(Msg(event)),
+  subscriptions: List(Subscription(event)),
+) -> Result(Nil, String) {
+  list.try_each(subscriptions, subscribe(self, _))
+  |> result.replace_error(
+    "consumer was not able to subscribe to producer because that process is not alive",
+  )
+}
+
+fn subscribe(
+  self: Subject(Msg(event)),
+  subscription: Subscription(event),
+) -> Result(Nil, Nil) {
+  use _ <- result.map(process.subject_owner(subscription.to.subject))
+  process.send(self, subscribe_message(subscription))
+}
+
+fn subscribe_message(subscription: Subscription(event)) {
+  let min_demand =
+    option.unwrap(subscription.min_demand, subscription.max_demand / 2)
+
+  message.ConsumerSubscribe(
+    subscription.to.subject,
+    min_demand,
+    subscription.max_demand,
+  )
 }
 
 type Next(state, event) =

@@ -186,10 +186,12 @@ fn initialise(
       handle_events: builder.handle_events,
     )
 
+  let result = consumer.init_subscriptions(self_consumer, builder.subscriptions)
+
+  use _ <- result.map(result)
   actor.initialised(state)
   |> actor.selecting(selector)
   |> actor.returning(Processor(self, self_consumer, self_producer))
-  |> Ok
 }
 
 type Msg(in, out) =
