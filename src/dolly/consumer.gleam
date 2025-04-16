@@ -1,14 +1,13 @@
 import dolly/internal/batch.{type Batch, type Demand, Batch, Demand}
 import dolly/internal/message
-import dolly/subscription.{type Subscription}
+import dolly/subscription.{type Subscription, Permanent, Temporary, Transient}
 import gleam/dict.{type Dict}
 import gleam/function
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import redux/erlang/process.{
-  type ExitReason, type Monitor, type Name, type Pid, type Selector,
-  type Subject,
+  type ExitReason, type Name, type Pid, type Selector, type Subject,
 }
 import redux/otp/actor.{type Initialised, type StartError}
 
@@ -79,13 +78,21 @@ type Self(event) =
 type Producer(event) =
   Subject(message.Producer(event))
 
+type Monitor(event) {
+  Monitor(
+    mon: process.Monitor,
+    subject: Producer(event),
+    cancel: message.Cancel,
+  )
+}
+
 type State(state, event) {
   State(
     state: state,
     self: Self(event),
     selector: Selector(Msg(event)),
     producers: Dict(Producer(event), Demand),
-    monitors: Dict(Pid, #(Monitor, Producer(event))),
+    monitors: Dict(Pid, Monitor(event)),
     handle_events: fn(state, List(event)) -> Consume(state),
   )
 }
@@ -159,8 +166,15 @@ fn subscribe_message(subscription: Subscription(event)) {
   let min_demand =
     option.unwrap(subscription.min_demand, subscription.max_demand / 2)
 
+  // TODO remove jank
+  let cancel = case subscription.cancel {
+    Permanent -> message.Permanent
+    Temporary -> message.Temporary
+    Transient -> message.Transient
+  }
   message.ConsumerSubscribe(
     subscription.to.subject,
+    cancel,
     min_demand,
     subscription.max_demand,
   )
@@ -175,8 +189,8 @@ fn on_message(
 ) -> Next(state, event) {
   case message {
     message.NewEvents(events:, from:) -> on_new_events(state, events, from)
-    message.ConsumerSubscribe(producer:, min_demand:, max_demand:) ->
-      on_subscribe(state, producer, min_demand, max_demand)
+    message.ConsumerSubscribe(producer:, cancel:, min_demand:, max_demand:) ->
+      on_subscribe(state, producer, cancel, min_demand, max_demand)
     message.ConsumerUnsubscribe(producer:) -> on_unsubscribe(state, producer)
     message.ProducerDown(down) -> on_producer_down(state, down)
   }
@@ -202,6 +216,7 @@ fn on_new_events(
 fn on_subscribe(
   state: State(state, event),
   producer: Producer(event),
+  cancel: message.Cancel,
   min_demand: Int,
   max_demand: Int,
 ) -> Next(state, event) {
@@ -212,7 +227,8 @@ fn on_subscribe(
     state.selector
     |> process.selecting_monitors(message.ProducerDown)
 
-  let monitors = state.monitors |> dict.insert(pid, #(mon, producer))
+  let monitors =
+    state.monitors |> dict.insert(pid, Monitor(mon, producer, cancel))
   let producers =
     dict.insert(
       state.producers,
@@ -233,7 +249,7 @@ fn on_unsubscribe(
 
   let producers = dict.delete(state.producers, producer)
   let monitors = case dict.get(state.monitors, pid) {
-    Ok(#(mon, _)) -> {
+    Ok(Monitor(mon, _, _)) -> {
       process.demonitor_process(mon)
       dict.delete(state.monitors, pid)
     }
@@ -252,7 +268,7 @@ fn on_producer_down(
     as "consumer was monitoring a port"
 
   let state = case dict.get(state.monitors, pid) {
-    Ok(#(_, producer)) -> {
+    Ok(Monitor(_, producer, _)) -> {
       let producers = dict.delete(state.producers, producer)
       let monitors = dict.delete(state.monitors, pid)
       State(..state, producers:, monitors:)

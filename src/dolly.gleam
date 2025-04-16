@@ -15,8 +15,15 @@ fn subscribe_message(subscription: Subscription(event)) {
   let min_demand =
     option.unwrap(subscription.min_demand, subscription.max_demand / 2)
 
+  // TODO remove jank
+  let cancel = case subscription.cancel {
+    subscription.Permanent -> message.Permanent
+    subscription.Temporary -> message.Temporary
+    subscription.Transient -> message.Transient
+  }
   message.ConsumerSubscribe(
     subscription.to.subject,
+    cancel,
     min_demand,
     subscription.max_demand,
   )

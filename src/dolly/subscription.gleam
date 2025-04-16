@@ -1,11 +1,20 @@
 import dolly/producer.{type Producer}
 import gleam/option.{type Option, None, Some}
-import redux/otp/supervision.{type Restart}
+
+//In case of exits, the same reason is used to exit the consumer.
+pub type Cancel {
+  /// the consumer exits when the producer cancels or exits.
+  Permanent
+  /// then consumer exits only if reason is not :normal, :shutdown, or {:shutdown, reason}
+  Transient
+  /// the consumer never exits
+  Temporary
+}
 
 pub type Subscription(event) {
   Subscription(
     to: Producer(event),
-    restart: Restart,
+    cancel: Cancel,
     min_demand: Option(Int),
     max_demand: Int,
   )
@@ -14,17 +23,17 @@ pub type Subscription(event) {
 pub fn to(producer: Producer(event)) -> Subscription(event) {
   Subscription(
     to: producer,
-    restart: supervision.Permanent,
+    cancel: Permanent,
     min_demand: None,
     max_demand: 1000,
   )
 }
 
-pub fn restart(
+pub fn cancel(
   subscription: Subscription(event),
-  restart: Restart,
+  cancel: Cancel,
 ) -> Subscription(event) {
-  Subscription(..subscription, restart:)
+  Subscription(..subscription, cancel:)
 }
 
 pub fn min_demand(
