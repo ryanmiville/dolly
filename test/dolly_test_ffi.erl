@@ -1,11 +1,23 @@
 -module(dolly_test_ffi).
 
--export([receive_eventually/3]).
+-export([should_receive/3, should_not_receive/3]).
 
-receive_eventually({subject, _Pid, Ref}, Message, Timeout) ->
+-include_lib("eunit/include/eunit.hrl").
+
+should_receive({subject, _Pid, Ref}, Message, Timeout) ->
     receive
         {Ref, Message} ->
-            {ok, Message}
+            nil
     after Timeout ->
-        {error, nil}
+        ?assertEqual(Message, timeout),
+        nil
+    end.
+
+should_not_receive({subject, _Pid, Ref}, Message, Timeout) ->
+    receive
+        {Ref, Message} ->
+            ?assertEqual(nil, Message),
+            nil
+    after Timeout ->
+        nil
     end.

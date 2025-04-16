@@ -7,7 +7,6 @@ import dolly/processor
 import dolly/producer
 import dolly/subscription
 import gleam/list
-import gleeunit/should
 import redux/erlang/process.{type Subject}
 
 pub fn main() {
@@ -22,6 +21,12 @@ fn counter(
     producer.Next(events, state + demand)
   }
   producer.new(initial_state)
+  |> producer.handle_demand(handle_demand)
+}
+
+fn demand_producer() {
+  let handle_demand = fn(state, demand) { producer.Next([demand], state) }
+  producer.new(Nil)
   |> producer.handle_demand(handle_demand)
 }
 
@@ -73,21 +78,6 @@ fn sleeper(receiver: Subject(List(Int))) -> consumer.Builder(Int, Int) {
   })
 }
 
-fn assert_received(subject: Subject(a), expected: a, timeout: Int) {
-  process.receive(subject, timeout)
-  |> should.equal(Ok(expected))
-}
-
-fn assert_not_received(subject: Subject(a), not_expected: a, timeout: Int) {
-  process.receive(subject, timeout)
-  |> should.not_equal(Ok(not_expected))
-}
-
-fn assert_received_eventually(subject: Subject(a), expected: a, timeout: Int) {
-  receive_eventually(subject, expected, timeout)
-  |> should.equal(Ok(expected))
-}
-
 pub fn producer_to_consumer_default_demand_test() {
   let assert Ok(prod) = counter(0) |> producer.start
 
@@ -102,10 +92,10 @@ pub fn producer_to_consumer_default_demand_test() {
   consumer |> dolly.subscribe(to: sub)
 
   let batch = list.range(0, 499)
-  assert_received(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 
   let batch = list.range(500, 999)
-  assert_received(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 }
 
 pub fn producer_to_consumer_80_percent_min_demand_test() {
@@ -125,13 +115,13 @@ pub fn producer_to_consumer_80_percent_min_demand_test() {
   dolly.subscribe(from: consumer, to: sub)
 
   let batch = list.range(0, 19)
-  assert_received(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 
   let batch = list.range(20, 39)
-  assert_received(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 
   let batch = list.range(1000, 1019)
-  assert_received_eventually(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 }
 
 pub fn producer_to_consumer_20_percent_min_demand_test() {
@@ -151,19 +141,19 @@ pub fn producer_to_consumer_20_percent_min_demand_test() {
   dolly.subscribe(from: consumer, to: sub)
 
   let batch = list.range(0, 79)
-  assert_received(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 
   let batch = list.range(80, 99)
-  assert_received(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 
   let batch = list.range(100, 179)
-  assert_received(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 
   let batch = list.range(180, 259)
-  assert_received(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 
   let batch = list.range(260, 279)
-  assert_received(events_subject, batch, 20)
+  should_receive(events_subject, batch, 20)
 }
 
 pub fn producer_to_consumer_0_min_1_max_demand_test() {
@@ -182,11 +172,11 @@ pub fn producer_to_consumer_0_min_1_max_demand_test() {
 
   dolly.subscribe(consumer, sub)
 
-  assert_received(events_subject, [0], 20)
+  should_receive(events_subject, [0], 20)
 
-  assert_received(events_subject, [1], 20)
+  should_receive(events_subject, [1], 20)
 
-  assert_received(events_subject, [2], 20)
+  should_receive(events_subject, [2], 20)
 }
 
 // // pub fn producer_to_consumer_broadcast_demand_test() {
@@ -223,22 +213,22 @@ pub fn producer_to_processor_to_consumer_80_percent_min_demand_test() {
   dolly.subscribe(processor.as_consumer(doubler), prod_sub)
 
   let batch = list.range(0, 19)
-  assert_received(doubler_subject, batch, 20)
+  should_receive(doubler_subject, batch, 20)
 
   let batch = doubled_range(0, 19)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = doubled_range(20, 39)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = list.range(100, 119)
-  assert_received_eventually(doubler_subject, batch, 100)
+  should_receive(doubler_subject, batch, 100)
 
   let batch = list.flat_map(list.range(120, 124), fn(event) { [event, event] })
-  assert_received_eventually(consumer_subject, batch, 100)
+  should_receive(consumer_subject, batch, 100)
 
   let batch = list.flat_map(list.range(125, 139), fn(event) { [event, event] })
-  assert_received_eventually(consumer_subject, batch, 100)
+  should_receive(consumer_subject, batch, 100)
 }
 
 pub fn producer_to_processor_to_consumer_20_percent_min_demand_test() {
@@ -264,19 +254,19 @@ pub fn producer_to_processor_to_consumer_20_percent_min_demand_test() {
   dolly.subscribe(processor.as_consumer(doubler), prod_sub)
 
   let batch = list.range(0, 79)
-  assert_received(doubler_subject, batch, 20)
+  should_receive(doubler_subject, batch, 20)
 
   let batch = doubled_range(0, 24)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = doubled_range(25, 49)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = doubled_range(50, 74)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = list.range(100, 179)
-  assert_received_eventually(doubler_subject, batch, 100)
+  should_receive(doubler_subject, batch, 100)
 }
 
 pub fn producer_to_processor_to_consumer_80_percent_min_demand_late_subscription_test() {
@@ -303,22 +293,22 @@ pub fn producer_to_processor_to_consumer_80_percent_min_demand_late_subscription
   dolly.subscribe(processor.as_consumer(doubler), prod_sub)
 
   let batch = list.range(0, 19)
-  assert_received(doubler_subject, batch, 20)
+  should_receive(doubler_subject, batch, 20)
 
   let batch = doubled_range(0, 19)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = doubled_range(20, 39)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = list.range(100, 119)
-  assert_received_eventually(doubler_subject, batch, 100)
+  should_receive(doubler_subject, batch, 100)
 
   let batch = list.flat_map(list.range(120, 124), fn(event) { [event, event] })
-  assert_received_eventually(consumer_subject, batch, 100)
+  should_receive(consumer_subject, batch, 100)
 
   let batch = list.flat_map(list.range(125, 139), fn(event) { [event, event] })
-  assert_received_eventually(consumer_subject, batch, 100)
+  should_receive(consumer_subject, batch, 100)
 }
 
 pub fn producer_to_processor_to_consumer_20_percent_min_demand_late_subscription_test() {
@@ -345,19 +335,19 @@ pub fn producer_to_processor_to_consumer_20_percent_min_demand_late_subscription
   dolly.subscribe(processor.as_consumer(doubler), prod_sub)
 
   let batch = list.range(0, 79)
-  assert_received(doubler_subject, batch, 20)
+  should_receive(doubler_subject, batch, 20)
 
   let batch = doubled_range(0, 24)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = doubled_range(25, 49)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = doubled_range(50, 74)
-  assert_received(consumer_subject, batch, 20)
+  should_receive(consumer_subject, batch, 20)
 
   let batch = list.range(100, 179)
-  assert_received_eventually(doubler_subject, batch, 100)
+  should_receive(doubler_subject, batch, 100)
 }
 
 pub fn producer_to_processor_to_consumer_stops_asking_when_consumer_stops_asking_test() {
@@ -383,14 +373,14 @@ pub fn producer_to_processor_to_consumer_stops_asking_when_consumer_stops_asking
   dolly.subscribe(processor.as_consumer(pass_through), counter_sub)
   dolly.subscribe(sleeper, pass_through_sub)
 
-  assert_received(pass_through_subject, [0, 1], 20)
-  assert_received(sleeper_subject, [0, 1], 20)
-  assert_received(pass_through_subject, [2, 3], 20)
-  assert_received(pass_through_subject, [4, 5], 20)
-  assert_received(pass_through_subject, [6, 7], 20)
-  assert_received(pass_through_subject, [8, 9], 20)
-  assert_not_received(sleeper_subject, [2, 3], 20)
-  assert_not_received(pass_through_subject, [10, 11], 20)
+  should_receive(pass_through_subject, [0, 1], 20)
+  should_receive(sleeper_subject, [0, 1], 20)
+  should_receive(pass_through_subject, [2, 3], 20)
+  should_receive(pass_through_subject, [4, 5], 20)
+  should_receive(pass_through_subject, [6, 7], 20)
+  should_receive(pass_through_subject, [8, 9], 20)
+  should_not_receive(sleeper_subject, [2, 3], 20)
+  should_not_receive(pass_through_subject, [10, 11], 20)
 }
 
 pub fn producer_to_processor_to_consumer_keeps_emitting_even_when_discarded_test() {
@@ -415,9 +405,9 @@ pub fn producer_to_processor_to_consumer_keeps_emitting_even_when_discarded_test
   dolly.subscribe(forwarder, discarder_sub)
   dolly.subscribe(processor.as_consumer(discarder), counter_sub)
 
-  assert_received(discarder_subject, list.range(0, 19), 20)
-  assert_received_eventually(discarder_subject, list.range(100, 119), 100)
-  assert_received_eventually(discarder_subject, list.range(1000, 1019), 100)
+  should_receive(discarder_subject, list.range(0, 19), 20)
+  should_receive(discarder_subject, list.range(100, 119), 100)
+  should_receive(discarder_subject, list.range(1000, 1019), 100)
 }
 
 // // pub fn single_test() {
@@ -426,9 +416,9 @@ pub fn producer_to_processor_to_consumer_keeps_emitting_even_when_discarded_test
 // //   let cons = forwarder(subject)
 // //   subscription.from(cons) |> subscription.to(prod)
 
-// //   assert_received(subject, [0], 20)
-// //   assert_received(subject, [1], 20)
-// //   assert_received(subject, [3], 20)
+// //   should_receive(subject, [0], 20)
+// //   should_receive(subject, [1], 20)
+// //   should_receive(subject, [3], 20)
 // // }
 
 // // pub fn producer_to_processor_to_consumer_with_broadcast_demand_test() {
@@ -449,13 +439,106 @@ pub fn producer_to_processor_to_consumer_keeps_emitting_even_when_discarded_test
 // //   )
 // // }
 
+pub fn accumulate_on_start_test() {
+  let assert Ok(prod) =
+    counter(0) |> producer.mode(producer.Accumulate) |> producer.start
+
+  let sub =
+    subscription.to(prod)
+    |> subscription.max_demand(4)
+    |> subscription.min_demand(0)
+
+  let events_subject = process.new_subject()
+  let assert Ok(consumer) =
+    forwarder(events_subject)
+    |> consumer.start
+  dolly.subscribe(consumer, sub)
+
+  should_not_receive(events_subject, [0, 1, 2, 3], 10)
+  producer.forward(prod)
+  should_receive(events_subject, [0, 1, 2, 3], 10)
+}
+
 fn doubled_range(start: Int, end: Int) -> List(Int) {
   list.flat_map(list.range(start, end), fn(event) { [event, event] })
 }
 
-@external(erlang, "dolly_test_ffi", "receive_eventually")
-fn receive_eventually(
-  subject: Subject(a),
-  expected: a,
-  timeout: Int,
-) -> Result(a, Nil)
+// pub fn accumulate_via_api_using_broadcast_test() {
+//   todo
+// }
+
+pub fn set_accumulate_after_start_test() {
+  let assert Ok(prod) = counter(0) |> producer.start
+
+  producer.accumulate(prod)
+
+  let sub =
+    subscription.to(prod)
+    |> subscription.max_demand(4)
+    |> subscription.min_demand(0)
+
+  let events_subject = process.new_subject()
+  let assert Ok(consumer) =
+    forwarder(events_subject)
+    |> consumer.start
+
+  dolly.subscribe(consumer, sub)
+
+  should_not_receive(events_subject, [0, 1, 2, 3], 10)
+  producer.forward(prod)
+  should_receive(events_subject, [0, 1, 2, 3], 10)
+}
+
+pub fn accumulating_not_reset_test() {
+  let assert Ok(prod) =
+    counter(0) |> producer.mode(producer.Accumulate) |> producer.start
+  let events_subject = process.new_subject()
+  let assert Ok(consumer) =
+    forwarder(events_subject)
+    |> consumer.start
+
+  let sub =
+    subscription.to(prod)
+    |> subscription.max_demand(4)
+    |> subscription.min_demand(0)
+  dolly.subscribe(consumer, sub)
+  should_not_receive(events_subject, [0, 1, 2, 3], 10)
+  producer.accumulate(prod)
+  producer.forward(prod)
+  should_receive(events_subject, [0, 1, 2, 3], 10)
+}
+
+pub fn does_not_combine_commands_when_accumulating_test() {
+  let assert Ok(prod) =
+    demand_producer()
+    |> producer.mode(producer.Accumulate)
+    |> producer.start
+
+  let events_subject = process.new_subject()
+  let assert Ok(consumer1) =
+    forwarder(events_subject)
+    |> consumer.start
+  let assert Ok(consumer2) =
+    forwarder(events_subject)
+    |> consumer.start
+
+  let sub =
+    subscription.to(prod)
+    |> subscription.max_demand(2)
+
+  dolly.subscribe(consumer1, sub)
+  dolly.subscribe(consumer2, sub)
+
+  should_not_receive(events_subject, [4], 10)
+  should_not_receive(events_subject, [1], 10)
+  producer.forward(prod)
+  should_receive(events_subject, [2], 10)
+  should_receive(events_subject, [2], 10)
+  should_receive(events_subject, [1], 10)
+}
+
+@external(erlang, "dolly_test_ffi", "should_receive")
+fn should_receive(subject: Subject(a), expected: a, timeout: Int) -> Nil
+
+@external(erlang, "dolly_test_ffi", "should_not_receive")
+fn should_not_receive(subject: Subject(a), expected: a, timeout: Int) -> Nil
