@@ -9,17 +9,13 @@ import redux/erlang/process.{type Subject}
 
 /// A type to represent a demand with selector function
 pub type DemandWithSelector(event) {
-  DemandWithSelector(
-    counter: Int,
-    ref: From(event),
-    selector: Option(fn(event) -> Bool),
-  )
+  DemandWithSelector(counter: Int, selector: Option(fn(event) -> Bool))
 }
 
 /// The state of the BroadcastDispatcher
 pub type BroadcastDispatcher(event) {
   BroadcastDispatcher(
-    demands: List(DemandWithSelector(event)),
+    demands: List(#(From(event), DemandWithSelector(event))),
     waiting: Int,
     subscribed_processes: Set(Subject(message.Consumer(event))),
   )
@@ -114,7 +110,8 @@ fn dispatch(
       let #(deliver_now, deliver_later, waiting) =
         split_events(events, length, state.waiting)
 
-      list.each(state.demands, fn(demand) {
+      list.each(state.demands, fn(demand_pair) {
+        let #(ref, demand) = demand_pair
         let #(selected, discarded) =
           filter_and_count(deliver_now, demand.selector)
 
@@ -122,12 +119,12 @@ fn dispatch(
         case discarded {
           0 -> Nil
           _ -> {
-            process.send(self, message.Ask(discarded, demand.ref))
+            process.send(self, message.Ask(discarded, ref))
           }
         }
 
         // Send the selected events
-        process.send(demand.ref, message.NewEvents(selected, self))
+        process.send(ref, message.NewEvents(selected, self))
       })
 
       #(deliver_later, BroadcastDispatcher(..state, waiting: waiting))
@@ -166,12 +163,13 @@ fn subscribe(
 }
 
 // Helper function to get minimum demand across all consumers
-fn get_min(demands: List(DemandWithSelector(event))) -> Int {
+fn get_min(demands: List(#(From(event), DemandWithSelector(event)))) -> Int {
   case demands {
     [] -> 0
-    [first, ..rest] -> {
+    [#(_, first), ..rest] -> {
       let min_val =
-        list.fold(rest, first.counter, fn(min_so_far, demand) {
+        list.fold(rest, first.counter, fn(min_so_far, demand_pair) {
+          let #(_, demand) = demand_pair
           int.min(min_so_far, demand.counter)
         })
       int.max(min_val, 0)
@@ -197,13 +195,14 @@ fn split_events(
 // Helper function to adjust demand by minimum amount
 fn adjust_demand(
   min: Int,
-  demands: List(DemandWithSelector(event)),
-) -> List(DemandWithSelector(event)) {
+  demands: List(#(From(event), DemandWithSelector(event))),
+) -> List(#(From(event), DemandWithSelector(event))) {
   case min {
     0 -> demands
     _ ->
-      list.map(demands, fn(demand) {
-        DemandWithSelector(..demand, counter: demand.counter - min)
+      list.map(demands, fn(demand_pair) {
+        let #(ref, demand) = demand_pair
+        #(ref, DemandWithSelector(..demand, counter: demand.counter - min))
       })
   }
 }
@@ -213,41 +212,33 @@ fn add_demand(
   counter: Int,
   ref: From(event),
   selector: Option(fn(event) -> Bool),
-  demands: List(DemandWithSelector(event)),
-) -> List(DemandWithSelector(event)) {
-  let new_demand = DemandWithSelector(counter, ref, selector)
-  [new_demand, ..demands]
+  demands: List(#(From(event), DemandWithSelector(event))),
+) -> List(#(From(event), DemandWithSelector(event))) {
+  let new_demand = DemandWithSelector(counter, selector)
+  [#(ref, new_demand), ..demands]
 }
 
 // Helper function to find and remove demand by reference
 fn pop_demand(
   ref: From(event),
-  demands: List(DemandWithSelector(event)),
-) -> #(Int, Option(fn(event) -> Bool), List(DemandWithSelector(event))) {
-  case list.find(demands, fn(d) { d.ref == ref }) {
-    Error(Nil) -> todo
-    Ok(d) -> todo
-  }
-  let result =
-    list.fold_until(demands, #(None, []), fn(acc, demand) {
-      case demand.ref == ref {
-        True -> list.Stop(#(Some(#(demand.counter, demand.selector)), acc.1))
-        False -> list.Continue(#(acc.0, [demand, ..acc.1]))
-      }
-    })
-
-  case result.0 {
-    Some(#(counter, selector)) -> #(counter, selector, result.1)
-    None -> #(0, None, demands)
+  demands: List(#(From(event), DemandWithSelector(event))),
+) -> #(
+  Int,
+  Option(fn(event) -> Bool),
+  List(#(From(event), DemandWithSelector(event))),
+) {
+  case list.key_pop(demands, ref) {
+    Error(Nil) -> #(0, None, demands)
+    Ok(#(current, demands)) -> #(current.counter, current.selector, demands)
   }
 }
 
 // Helper function to delete demand by reference
 fn delete_demand(
   ref: From(event),
-  demands: List(DemandWithSelector(event)),
-) -> List(DemandWithSelector(event)) {
-  list.filter(demands, fn(demand) { demand.ref != ref })
+  demands: List(#(From(event), DemandWithSelector(event))),
+) -> List(#(From(event), DemandWithSelector(event))) {
+  list.filter(demands, fn(demand_pair) { demand_pair.0 != ref })
 }
 
 // Helper function to filter events with selector and count discarded events

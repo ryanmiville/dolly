@@ -27,7 +27,7 @@ fn forwarder_loop(parent, msg) {
   actor.continue(parent)
 }
 
-pub fn subscribes_and_cancels_testx() {
+pub fn subscribes_and_cancels_test() {
   let disp = bd.build() |> dispatcher.initialise
   let subject = process.new_subject()
 
@@ -36,8 +36,8 @@ pub fn subscribes_and_cancels_testx() {
   let expected_subscribers = set.from_list([subject])
 
   // Check state has the expected format
-  let assert BroadcastDispatcher([demand], 0, subscribers) = disp.state
-  demand.ref |> should.equal(subject)
+  let assert BroadcastDispatcher([#(ref, demand)], 0, subscribers) = disp.state
+  ref |> should.equal(subject)
   demand.counter |> should.equal(0)
   demand.selector |> should.equal(None)
   subscribers |> should.equal(expected_subscribers)
@@ -48,22 +48,22 @@ pub fn subscribes_and_cancels_testx() {
   subscribers |> should.equal(set.new())
 }
 
-pub fn subscribes_asks_and_cancels_testx() {
+pub fn subscribes_asks_and_cancels_test() {
   let disp = bd.build() |> dispatcher.initialise
   let subject = process.new_subject()
   let expected_subscribers = set.from_list([subject])
 
   // Subscribe
   let assert Ok(#(0, disp)) = dispatcher.subscribe(disp, subject)
-  let assert BroadcastDispatcher([demand], 0, subscribers) = disp.state
-  demand.ref |> should.equal(subject)
+  let assert BroadcastDispatcher([#(ref, demand)], 0, subscribers) = disp.state
+  ref |> should.equal(subject)
   demand.counter |> should.equal(0)
   demand.selector |> should.equal(None)
   subscribers |> should.equal(expected_subscribers)
 
   // Ask
   let assert #(10, disp) = dispatcher.ask(disp, 10, subject)
-  let assert BroadcastDispatcher([demand], 10, subscribers) = disp.state
+  let assert BroadcastDispatcher([#(_, demand)], 10, subscribers) = disp.state
   demand.counter |> should.equal(0)
   subscribers |> should.equal(expected_subscribers)
 
@@ -73,7 +73,7 @@ pub fn subscribes_asks_and_cancels_testx() {
   subscribers |> should.equal(set.new())
 }
 
-pub fn multiple_subscriptions_with_early_demand_testx() {
+pub fn multiple_subscriptions_with_early_demand_test() {
   let disp = bd.build() |> dispatcher.initialise
   let subject1 = process.new_subject()
   let subject2 =
@@ -83,14 +83,14 @@ pub fn multiple_subscriptions_with_early_demand_testx() {
   let assert Ok(#(0, disp)) = dispatcher.subscribe(disp, subject1)
   let expected_subs1 = set.from_list([subject1])
 
-  let assert BroadcastDispatcher([demand], 0, subs) = disp.state
-  demand.ref |> should.equal(subject1)
+  let assert BroadcastDispatcher([#(ref, demand)], 0, subs) = disp.state
+  ref |> should.equal(subject1)
   demand.counter |> should.equal(0)
   subs |> should.equal(expected_subs1)
 
   // Ask demand for first subscription
   let assert #(10, disp) = dispatcher.ask(disp, 10, subject1)
-  let assert BroadcastDispatcher([demand], 10, subs) = disp.state
+  let assert BroadcastDispatcher([#(_, demand)], 10, subs) = disp.state
   demand.counter |> should.equal(0)
   subs |> should.equal(expected_subs1)
 
@@ -105,18 +105,18 @@ pub fn multiple_subscriptions_with_early_demand_testx() {
   let assert #(0, disp) = dispatcher.cancel(disp, subject1)
   let expected_subs3 = set.delete(expected_subs2, subject1)
 
-  let assert BroadcastDispatcher([remaining], 0, subs) = disp.state
-  remaining.ref |> should.equal(subject2)
+  let assert BroadcastDispatcher([#(ref, _)], 0, subs) = disp.state
+  ref |> should.equal(subject2)
   subs |> should.equal(expected_subs3)
 
   // Ask demand for second subscription
   let assert #(10, disp) = dispatcher.ask(disp, 10, subject2)
-  let assert BroadcastDispatcher([demand], 10, subs) = disp.state
+  let assert BroadcastDispatcher([#(_, demand)], 10, subs) = disp.state
   demand.counter |> should.equal(0)
   subs |> should.equal(expected_subs3)
 }
 
-pub fn multiple_subscriptions_with_late_demand_testx() {
+pub fn multiple_subscriptions_with_late_demand_test() {
   let disp = bd.build() |> dispatcher.initialise
   let subject1 = process.new_subject()
   let subject2 = spawn_forwarder()
@@ -125,8 +125,8 @@ pub fn multiple_subscriptions_with_late_demand_testx() {
   let assert Ok(#(0, disp)) = dispatcher.subscribe(disp, subject1)
   let expected_subs1 = set.from_list([subject1])
 
-  let assert BroadcastDispatcher([demand], 0, subs) = disp.state
-  demand.ref |> should.equal(subject1)
+  let assert BroadcastDispatcher([#(ref, _)], 0, subs) = disp.state
+  ref |> should.equal(subject1)
   subs |> should.equal(expected_subs1)
 
   // Second subscription
@@ -139,19 +139,20 @@ pub fn multiple_subscriptions_with_late_demand_testx() {
   // Ask demand for first subscription
   let assert #(0, disp) = dispatcher.ask(disp, 10, subject1)
 
-  let assert BroadcastDispatcher([demand_a, demand_b], 0, _) = disp.state
+  let assert BroadcastDispatcher([#(_, demand_a), #(_, demand_b)], 0, _) =
+    disp.state
   let has_subject1 =
     list.any([demand_a.counter, demand_b.counter], fn(c) { c == 10 })
   has_subject1 |> should.be_true
 
   // Cancel second subscription
   let assert #(10, disp) = dispatcher.cancel(disp, subject2)
-  let assert BroadcastDispatcher([demand], 10, _) = disp.state
-  demand.ref |> should.equal(subject1)
+  let assert BroadcastDispatcher([#(ref, _)], 10, _) = disp.state
+  ref |> should.equal(subject1)
 
   // Ask more demand for first subscription
   let assert #(10, disp) = dispatcher.ask(disp, 10, subject1)
-  let assert BroadcastDispatcher([demand], 20, _) = disp.state
+  let assert BroadcastDispatcher([#(_, demand)], 20, _) = disp.state
   demand.counter |> should.equal(0)
 }
 
@@ -177,7 +178,6 @@ pub fn subscribes_asks_and_dispatches_to_multiple_consumers_test() {
   should_receive(subject1, message.NewEvents(["a", "b"], self), 200)
   should_receive(subject2, message.NewEvents(["a", "b"], self), 200)
 
-  echo disp
   // Ask more from second consumer
   let #(demand, disp) = dispatcher.ask(disp, 2, subject2)
   demand |> should.equal(1)
@@ -218,7 +218,7 @@ pub fn subscribes_asks_and_dispatches_to_multiple_consumers_test() {
   should_receive(subject3, message.NewEvents(["d", "e", "f"], self), 200)
 }
 
-pub fn subscribing_with_selector_function_testx() {
+pub fn subscribing_with_selector_function_test() {
   // This test can't be directly ported because Gleam doesn't support
   // passing selectors at subscription time. The selector would need to be
   // tested directly through the API calls.
@@ -252,7 +252,7 @@ pub fn subscribing_with_selector_function_testx() {
   result2 |> list.length |> should.equal(2)
 }
 
-pub fn subscribing_is_idempotent_testx() {
+pub fn subscribing_is_idempotent_test() {
   let disp = bd.build() |> dispatcher.initialise
   let subject = process.new_subject()
 
