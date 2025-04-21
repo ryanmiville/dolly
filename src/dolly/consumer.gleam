@@ -247,36 +247,56 @@ fn on_unsubscribe(
   let assert Ok(pid) = process.subject_owner(producer)
     as "producer subscriber has no PID"
 
-  let producers = dict.delete(state.producers, producer)
-  let monitors = case dict.get(state.monitors, pid) {
-    Ok(Monitor(mon, _, _)) -> {
-      process.demonitor_process(mon)
-      dict.delete(state.monitors, pid)
+  case dict.get(state.monitors, pid) {
+    Ok(_) -> {
+      process.send(producer, message.ProducerUnsubscribe(state.self))
+      cancel(state, pid, process.Normal)
     }
-    _ -> state.monitors
+    _ -> actor.continue(state)
   }
-  process.send(producer, message.ProducerUnsubscribe(state.self))
-  State(..state, producers:, monitors:)
-  |> actor.continue
 }
 
 fn on_producer_down(
   state: State(state, event),
   down: process.Down,
 ) -> Next(state, event) {
-  let assert process.ProcessDown(pid:, ..) = down
+  let assert process.ProcessDown(pid:, reason:, ..) = down
     as "consumer was monitoring a port"
 
-  let state = case dict.get(state.monitors, pid) {
-    Ok(Monitor(_, producer, _)) -> {
+  cancel(state, pid, reason)
+  // let state = case dict.get(state.monitors, pid) {
+  //   Ok(Monitor(_, producer, _)) -> {
+  //     let producers = dict.delete(state.producers, producer)
+  //     let monitors = dict.delete(state.monitors, pid)
+  //     State(..state, producers:, monitors:)
+  //   }
+  //   _ -> state
+  // }
+
+  // actor.continue(state)
+}
+
+fn cancel(
+  state: State(state, event),
+  pid: Pid,
+  reason: ExitReason,
+) -> Next(state, event) {
+  case dict.get(state.monitors, pid) {
+    Ok(Monitor(mon, producer, cancel)) -> {
+      process.demonitor_process(mon)
       let producers = dict.delete(state.producers, producer)
       let monitors = dict.delete(state.monitors, pid)
-      State(..state, producers:, monitors:)
+      let state = State(..state, producers:, monitors:)
+      case cancel {
+        // todo add reason
+        message.Permanent -> actor.stop()
+        // todo add reason
+        message.Transient if reason != process.Normal -> actor.stop()
+        _ -> actor.continue(state)
+      }
     }
-    _ -> state
+    _ -> actor.continue(state)
   }
-
-  actor.continue(state)
 }
 
 fn dispatch(

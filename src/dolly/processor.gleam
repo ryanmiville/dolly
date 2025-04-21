@@ -481,19 +481,33 @@ fn on_producer_down(
   state: State(state, dispatcher, in, out),
   down: process.Down,
 ) -> actor.Next(State(state, dispatcher, in, out), Msg(in, out)) {
-  let assert process.ProcessDown(pid:, ..) = down
+  let assert process.ProcessDown(pid:, reason:, ..) = down
     as "consumer was monitoring a port"
 
-  let state = case dict.get(state.producer_monitors, pid) {
-    Ok(Monitor(_, producer, _)) -> {
+  cancel(state, pid, reason)
+}
+
+fn cancel(
+  state: State(state, dispatcher, in, out),
+  pid: Pid,
+  reason: process.ExitReason,
+) -> Next(state, dispatcher, in, out) {
+  case dict.get(state.producer_monitors, pid) {
+    Ok(Monitor(mon, producer, cancel)) -> {
+      process.demonitor_process(mon)
       let producers = dict.delete(state.producers, producer)
       let producer_monitors = dict.delete(state.producer_monitors, pid)
-      State(..state, producers:, producer_monitors:)
+      let state = State(..state, producers:, producer_monitors:)
+      case cancel {
+        // todo add reason
+        message.Permanent -> actor.stop()
+        // todo add reason
+        message.Transient if reason != process.Normal -> actor.stop()
+        _ -> actor.continue(state)
+      }
     }
-    _ -> state
+    _ -> actor.continue(state)
   }
-
-  actor.continue(state)
 }
 
 fn on_consumer_unsubscribe(
@@ -503,17 +517,13 @@ fn on_consumer_unsubscribe(
   let assert Ok(pid) = process.subject_owner(producer)
     as "producer subscriber has no PID"
 
-  let producers = dict.delete(state.producers, producer)
-  let producer_monitors = case dict.get(state.producer_monitors, pid) {
-    Ok(Monitor(mon, _, _)) -> {
-      process.demonitor_process(mon)
-      dict.delete(state.producer_monitors, pid)
+  case dict.get(state.producer_monitors, pid) {
+    Ok(_) -> {
+      process.send(producer, message.ProducerUnsubscribe(state.self_consumer))
+      cancel(state, pid, process.Normal)
     }
-    _ -> state.producer_monitors
+    _ -> actor.continue(state)
   }
-  process.send(producer, message.ProducerUnsubscribe(state.self_consumer))
-  State(..state, producers:, producer_monitors:)
-  |> actor.continue
 }
 
 fn on_consumer_subscribe(
